@@ -1,113 +1,125 @@
-
-// const { clientId, guildId, token, publicKey } = require('./config.json');
-require('dotenv').config()
-const APPLICATION_ID = process.env.APPLICATION_ID 
-const TOKEN = process.env.TOKEN 
-const PUBLIC_KEY = process.env.PUBLIC_KEY || 'not set'
-const GUILD_ID = process.env.GUILD_ID 
-
-
-const axios = require('axios')
 const express = require('express');
 const { InteractionType, InteractionResponseType, verifyKeyMiddleware } = require('discord-interactions');
-
+require('dotenv').config();
+const APPLICATION_ID = process.env.APPLICATION_ID;
+const TOKEN = process.env.TOKEN;
+const PUBLIC_KEY = process.env.PUBLIC_KEY || 'not set';
+const GUILD_ID = process.env.GUILD_ID;
+const axios = require('axios');
+const { google } = require('googleapis');
+const textToSpeech = google.texttospeech('v1');
 
 const app = express();
-// app.use(bodyParser.json());
+
+app.use(express.json());
 
 const discord_api = axios.create({
   baseURL: 'https://discord.com/api/',
   timeout: 3000,
   headers: {
-	"Access-Control-Allow-Origin": "*",
-	"Access-Control-Allow-Methods": "GET, POST, PUT, DELETE",
-	"Access-Control-Allow-Headers": "Authorization",
-	"Authorization": `Bot ${TOKEN}`
+    "Authorization": `Bot ${TOKEN}`
   }
 });
-
-
-
 
 app.post('/interactions', verifyKeyMiddleware(PUBLIC_KEY), async (req, res) => {
   const interaction = req.body;
 
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
-    console.log(interaction.data.name)
-    if(interaction.data.name == 'yo'){
-      return res.send({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          content: `Yo ${interaction.member.user.username}!`,
-        },
-      });
-    }
+    if(interaction.data.name == 'readaloud'){
+      const textToRead = interaction.data.options.find(opt => opt.name === 'text').value;
+      const voiceChannelId = interaction.member.voice.channel_id;
+      
+      if (!voiceChannelId) {
+        return res.send({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: "You are not in a voice channel!",
+          },
+        });
+      }
 
-    if(interaction.data.name == 'dm'){
-      // https://discord.com/developers/docs/resources/user#create-dm
-      let c = (await discord_api.post(`/users/@me/channels`,{
-        recipient_id: interaction.member.user.id
-      })).data
-      try{
-        // https://discord.com/developers/docs/resources/channel#create-message
-        let res = await discord_api.post(`/channels/${c.id}/messages`,{
-          content:'Yo! I got your slash command. I am not able to respond to DMs just slash commands.',
-        })
-        console.log(res.data)
-      }catch(e){
-        console.log(e)
+      const voiceChannel = req.client.channels.cache.get(voiceChannelId);
+      if (!voiceChannel || voiceChannel.type !== 'voice') {
+        return res.send({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: "Cannot find your voice channel!",
+          },
+        });
+      }
+
+      try {
+        const audioContent = await generateSpeech(textToRead);
+        voiceChannel.join().then(async connection => {
+          const dispatcher = connection.play(audioContent, { type: 'opus' });
+          dispatcher.on('finish', () => {
+            voiceChannel.leave();
+          });
+        });
+      } catch (error) {
+        console.error('Error:', error);
+        return res.send({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: "An error occurred while processing the text to speech.",
+          },
+        });
       }
 
       return res.send({
-        // https://discord.com/developers/docs/interactions/receiving-and-responding#responding-to-an-interaction
         type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data:{
-          content:'👍'
-        }
+        data: {
+          content: "Text is being read aloud in the voice channel.",
+        },
       });
     }
   }
-
 });
-
-
 
 app.get('/register_commands', async (req,res) =>{
   let slash_commands = [
     {
-      "name": "yo",
-      "description": "replies with Yo!",
-      "options": []
-    },
-    {
-      "name": "dm",
-      "description": "sends user a DM",
-      "options": []
+      "name": "readaloud",
+      "description": "Reads aloud the provided text in the voice channel",
+      "options": [
+        {
+          "name": "text",
+          "description": "Text to be read aloud",
+          "type": 3,
+          "required": true
+        }
+      ]
     }
   ]
   try
   {
-    // api docs - https://discord.com/developers/docs/interactions/application-commands#create-global-application-command
     let discord_response = await discord_api.put(
       `/applications/${APPLICATION_ID}/guilds/${GUILD_ID}/commands`,
       slash_commands
     )
     console.log(discord_response.data)
-    return res.send('commands have been registered')
+    return res.send('Commands have been registered')
   }catch(e){
     console.error(e.code)
     console.error(e.response?.data)
-    return res.send(`${e.code} error from discord`)
+    return res.send(`${e.code} error from Discord`)
   }
-})
-
+});
 
 app.get('/', async (req,res) =>{
   return res.send('Follow documentation ')
 })
 
-
 app.listen(8999, () => {
+  console.log('Server running on port 8999');
+});
 
-})
-
+async function generateSpeech(text) {
+  const request = {
+    input: { text: text },
+    voice: { languageCode: 'en-US', ssmlGender: 'NEUTRAL' },
+    audioConfig: { audioEncoding: 'OGG_OPUS' },
+  };
+  const [response] = await textToSpeech.synthesizeSpeech(request);
+  return response.audioContent;
+}
