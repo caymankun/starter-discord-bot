@@ -1,17 +1,17 @@
+require('dotenv').config();
 const express = require('express');
 const { InteractionType, InteractionResponseType, verifyKeyMiddleware } = require('discord-interactions');
-require('dotenv').config();
+const axios = require('axios');
+const { VoiceConnection } = require('@discordjs/voice');
+const { Client } = require('discord.js');
+
+const app = express();
+const client = new Client();
+
 const APPLICATION_ID = process.env.APPLICATION_ID;
 const TOKEN = process.env.TOKEN;
 const PUBLIC_KEY = process.env.PUBLIC_KEY || 'not set';
 const GUILD_ID = process.env.GUILD_ID;
-const axios = require('axios');
-const { google } = require('googleapis');
-const textToSpeech = google.texttospeech('v1');
-
-const app = express();
-
-app.use(express.json());
 
 const discord_api = axios.create({
   baseURL: 'https://discord.com/api/',
@@ -21,105 +21,64 @@ const discord_api = axios.create({
   }
 });
 
+app.use(express.json());
+
+let voiceConnection = null;
+
+// Slashコマンドを登録する関数
+async function registerSlashCommands() {
+  let slash_commands = [
+    {
+      "name": "join",
+      "description": "ボイスチャンネルに参加します。"
+    },
+    {
+      "name": "bye",
+      "description": "ボイスチャンネルから退出します。"
+    }
+  ];
+  
+  try {
+    let discord_response = await discord_api.put(
+      `/applications/${APPLICATION_ID}/guilds/${GUILD_ID}/commands`,
+      slash_commands
+    );
+    console.log(discord_response.data);
+    return true;
+  } catch(e) {
+    console.error(e.code);
+    console.error(e.response?.data);
+    return false;
+  }
+}
+
+// Slashコマンドの登録を実行
+registerSlashCommands();
+
 app.post('/interactions', verifyKeyMiddleware(PUBLIC_KEY), async (req, res) => {
   const interaction = req.body;
 
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
-    if(interaction.data.name == 'readaloud'){
-      const textToRead = interaction.data.options.find(opt => opt.name === 'text').value;
-      const voiceChannelId = interaction.member.voice.channel_id;
-      
-      if (!voiceChannelId) {
-        return res.send({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: "You are not in a voice channel!",
-          },
-        });
-      }
+    if(interaction.data.name === 'join') {
+      // 以前のコードをここに追加
+    }
 
-      const voiceChannel = req.client.channels.cache.get(voiceChannelId);
-      if (!voiceChannel || voiceChannel.type !== 'voice') {
-        return res.send({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: "Cannot find your voice channel!",
-          },
-        });
-      }
-
-      try {
-        const audioContent = await generateSpeech(textToRead);
-        voiceChannel.join().then(async connection => {
-          const dispatcher = connection.play(audioContent, { type: 'opus' });
-          dispatcher.on('finish', () => {
-            voiceChannel.leave();
-          });
-        });
-      } catch (error) {
-        console.error('Error:', error);
-        return res.send({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: "An error occurred while processing the text to speech.",
-          },
-        });
-      }
-
-      return res.send({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          content: "Text is being read aloud in the voice channel.",
-        },
-      });
+    if(interaction.data.name === 'bye') {
+      // 以前のコードをここに追加
     }
   }
 });
 
-app.get('/register_commands', async (req,res) =>{
-  let slash_commands = [
-    {
-      "name": "readaloud",
-      "description": "Reads aloud the provided text in the voice channel",
-      "options": [
-        {
-          "name": "text",
-          "description": "Text to be read aloud",
-          "type": 3,
-          "required": true
-        }
-      ]
-    }
-  ]
-  try
-  {
-    let discord_response = await discord_api.put(
-      `/applications/${APPLICATION_ID}/guilds/${GUILD_ID}/commands`,
-      slash_commands
-    )
-    console.log(discord_response.data)
-    return res.send('Commands have been registered')
-  }catch(e){
-    console.error(e.code)
-    console.error(e.response?.data)
-    return res.send(`${e.code} error from Discord`)
-  }
+client.on('messageCreate', async (message) => {
+  // 以前のコードをここに追加
 });
 
 app.get('/', async (req,res) =>{
-  return res.send('Follow documentation ')
-})
-
-app.listen(8999, () => {
-  console.log('Server running on port 8999');
+  return res.send('ドキュメントに従ってください。');
 });
 
-async function generateSpeech(text) {
-  const request = {
-    input: { text: text },
-    voice: { languageCode: 'en-US', ssmlGender: 'NEUTRAL' },
-    audioConfig: { audioEncoding: 'OGG_OPUS' },
-  };
-  const [response] = await textToSpeech.synthesizeSpeech(request);
-  return response.audioContent;
-}
+client.login(TOKEN);
+
+app.listen(8999, () => {
+  console.log('サーバーがポート8999で実行されています。');
+});
